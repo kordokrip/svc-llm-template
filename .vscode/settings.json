@@ -1,0 +1,4 @@
+{
+  "python.terminal.activateEnvironment": true,
+  "python.defaultInterpreterPath": "/Users/sungho-kang/miniconda3/envs/langchain-basics/bin/python"
+}

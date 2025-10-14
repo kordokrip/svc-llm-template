@@ -1,0 +1,81 @@
+_wandb:
+    value:
+        cli_version: 0.22.0
+        e:
+            b9o5c6i0q47lkezgvnrtoq5th4wbut4d:
+                apple:
+                    ecpuCores: 4
+                    gpuCores: 8
+                    memoryGb: 16
+                    name: Apple M1
+                    pcpuCores: 4
+                    ramTotalBytes: "17179869184"
+                    swapTotalBytes: "2147483648"
+                args:
+                    - --model
+                    - ft:gpt-4.1-mini-2025-04-14:personal:svc-41mini-sft-dpo-80usd-sft:CLB4qudK
+                    - --run-name
+                    - SFT 41mini backfill
+                    - --tags
+                    - svc,41mini,sft,backfill
+                codePath: scripts/wandb_sync_openai_ft.py
+                codePathLocal: scripts/wandb_sync_openai_ft.py
+                cpu_count: 8
+                cpu_count_logical: 8
+                disk:
+                    /:
+                        total: "245107195904"
+                        used: "195545075712"
+                email: kordokrip@gmail.com
+                executable: /opt/anaconda3/envs/langchain-basics/bin/python
+                host: SungHoui-MacBookPro.local
+                memory:
+                    total: "17179869184"
+                os: macOS-15.7.1-arm64-arm-64bit
+                program: /Users/sungho-kang/svc-llm-template/scripts/wandb_sync_openai_ft.py
+                python: CPython 3.12.11
+                root: /Users/sungho-kang/svc-llm-template
+                startedAt: "2025-09-30T00:24:52.901470Z"
+                writerId: b9o5c6i0q47lkezgvnrtoq5th4wbut4d
+        m: []
+        python_version: 3.12.11
+        t:
+            "1":
+                - 95
+                - 105
+            "2":
+                - 95
+                - 105
+            "3":
+                - 2
+                - 13
+                - 15
+                - 16
+                - 61
+                - 62
+            "4": 3.12.11
+            "5": 0.22.0
+            "12": 0.22.0
+            "13": darwin-arm64
+base_model:
+    value: gpt-4.1-mini-2025-04-14
+created_at:
+    value: 1759149964
+hyperparameters:
+    value: Hyperparameters(batch_size=31, learning_rate_multiplier=2.0, n_epochs=1)
+job_id:
+    value: ftjob-g8IqmrtiyzUlzwj06lYCA81d
+method:
+    value: Method(type='supervised', dpo=None, reinforcement=None, supervised=SupervisedMethod(hyperparameters=SupervisedHyperparameters(batch_size=31, learning_rate_multiplier=2.0, n_epochs=1)))
+output_model:
+    value: ft:gpt-4.1-mini-2025-04-14:personal:svc-41mini-sft-dpo-80usd-sft:CLB4qudK
+status:
+    value: succeeded
+suffix:
+    value: CLB4qudK
+trained_tokens:
+    value: 16289475
+training_file:
+    value: file-CT8yERyssLuEjaf3pwstXz
+validation_file:
+    value: file-KvikYPwqzsAcAnFxXeKYNG

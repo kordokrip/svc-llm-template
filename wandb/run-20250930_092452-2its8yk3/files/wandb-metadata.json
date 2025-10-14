@@ -1,0 +1,41 @@
+{
+  "os":  "macOS-15.7.1-arm64-arm-64bit",
+  "python":  "CPython 3.12.11",
+  "startedAt":  "2025-09-30T00:24:52.901470Z",
+  "args":  [
+    "--model",
+    "ft:gpt-4.1-mini-2025-04-14:personal:svc-41mini-sft-dpo-80usd-sft:CLB4qudK",
+    "--run-name",
+    "SFT 41mini backfill",
+    "--tags",
+    "svc,41mini,sft,backfill"
+  ],
+  "program":  "/Users/sungho-kang/svc-llm-template/scripts/wandb_sync_openai_ft.py",
+  "codePath":  "scripts/wandb_sync_openai_ft.py",
+  "codePathLocal":  "scripts/wandb_sync_openai_ft.py",
+  "email":  "kordokrip@gmail.com",
+  "root":  "/Users/sungho-kang/svc-llm-template",
+  "host":  "SungHoui-MacBookPro.local",
+  "executable":  "/opt/anaconda3/envs/langchain-basics/bin/python",
+  "cpu_count":  8,
+  "cpu_count_logical":  8,
+  "disk":  {
+    "/":  {
+      "total":  "245107195904",
+      "used":  "195545075712"
+    }
+  },
+  "memory":  {
+    "total":  "17179869184"
+  },
+  "apple":  {
+    "name":  "Apple M1",
+    "ecpuCores":  4,
+    "pcpuCores":  4,
+    "gpuCores":  8,
+    "memoryGb":  16,
+    "swapTotalBytes":  "2147483648",
+    "ramTotalBytes":  "17179869184"
+  },
+  "writerId":  "b9o5c6i0q47lkezgvnrtoq5th4wbut4d"
+}

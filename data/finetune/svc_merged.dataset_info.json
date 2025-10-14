@@ -1,0 +1,32 @@
+{
+  "mode": "auto",
+  "seed": 42,
+  "val_ratio": 0.08,
+  "max_train_tokens": 16000000,
+  "min_tokens": 4,
+  "max_tokens": 0,
+  "counts": {
+    "sft": {
+      "train": 47323,
+      "val": 9480
+    },
+    "dpo": {
+      "train": 324,
+      "val": 26
+    }
+  },
+  "train_tokens_est": {
+    "sft": 15863568,
+    "dpo": 136196
+  },
+  "raw_stats": {
+    "seen": 208226,
+    "sft_keep": 207876,
+    "dpo_keep": 350,
+    "sft_drop": 0,
+    "dpo_drop": 0
+  },
+  "cost_estimates": {
+    "gpt-4.1-mini": 79.9988
+  }
+}
