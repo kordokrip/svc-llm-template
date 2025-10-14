@@ -213,3 +213,4 @@ pip install "openai>=1.40" "langchain>=0.2" langchain-community langchain-openai
 - **청킹**: 800~1200 / overlap 100~200으로 시작, k=4~6 검증.
 - **보안**: .env 키 관리 및 내부망에서 API만 공개.
 - **관측**: LangSmith 추적, 필요한 경우 W&B 로깅 병행.
+# svc-llm-template
