@@ -1,3 +1,11 @@
+# --- ensure 'src' on sys.path for Streamlit Cloud ---
+import os, sys
+APP_DIR = os.path.dirname(__file__)
+ROOT_DIR = os.path.abspath(os.path.join(APP_DIR, os.pardir))
+SRC_DIR = os.path.join(ROOT_DIR, "src")
+if SRC_DIR not in sys.path:
+    sys.path.insert(0, SRC_DIR)
+# ----------------------------------------------------
 import calendar
 import html
 import os
