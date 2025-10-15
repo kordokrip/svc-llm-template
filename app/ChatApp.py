@@ -21,7 +21,8 @@ from langchain_core.messages import AIMessage, AIMessageChunk, BaseMessage
 
 from svc_llm.llm.chat_model import get_chat
 from svc_llm.rag.rag_chain_pinecone import build_chain_pinecone
-from svc_llm.vectorstore.pinecone_store import get_pinecone
+# NOTE: Avoid importing `get_pinecone` at module import time to prevent hard crashes on Streamlit Cloud
+# when the Pinecone SDK is misinstalled (e.g., `pinecone-client` instead of `pinecone`).
 
 load_dotenv()
 
@@ -742,6 +743,17 @@ def _get_rag_components(
     key = (index_name, k, use_multi_query, use_compression)
     if cache.get("key") == key:
         return cache["chain"], cache["retriever"]  # type: ignore[return-value]
+
+    # Lazy import to catch dependency issues gracefully on Streamlit Cloud
+    try:
+        from svc_llm.vectorstore.pinecone_store import get_pinecone
+    except Exception as e:
+        st.error(
+            "Pinecone SDK 임포트 오류가 발생했습니다. Cloud 빌드에서 `pinecone-client`(구버전)과 `pinecone`(신버전) 혼재 시 자주 발생합니다.\n"
+            "해결: requirements.txt 에서 `pinecone-client` 를 제거하고 `pinecone>=3` 와(필요 시) `langchain-pinecone` 를 추가하세요.",
+            icon="🧩",
+        )
+        st.stop()
 
     vs = get_pinecone(index_name=index_name)
     retriever = vs.as_retriever(search_kwargs={"k": k})
