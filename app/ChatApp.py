@@ -13,6 +13,12 @@ import uuid
 from datetime import datetime, timezone
 from typing import Dict, List, Tuple, Set
 
+import json
+import csv
+import sqlite3
+from io import StringIO, BytesIO
+from pathlib import Path
+
 import streamlit as st
 import streamlit.components.v1 as components
 from dotenv import load_dotenv
@@ -544,6 +550,10 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
+DATA_DIR = os.path.join(ROOT_DIR, "data")
+DEFAULT_JSONL_PATH = os.path.join(DATA_DIR, "saved_conversations.jsonl")
+DEFAULT_DB_PATH = os.path.join(DATA_DIR, "conversations.db")
+
 CHIP_ICON = """
 <svg viewBox="0 0 120 120" xmlns="http://www.w3.org/2000/svg">
   <defs>
@@ -592,24 +602,6 @@ CHIP_ICON = """
 </svg>
 """
 
-ICON_STACK = [
-    ("＋", "새 대화"),
-    ("🧭", "추천"),
-    ("⭐", "즐겨찾기"),
-    ("🗓️", "일정"),
-    ("📎", "파일"),
-    ("⚙️", "설정"),
-]
-
-# 아이콘 라벨별 액션 매핑(요청: 아이콘 클릭 시 기능 수행)
-ICON_ACTION_MAP = {
-    "새 대화": "new_chat",
-    "추천": "recommend",
-    "즐겨찾기": "favorites",
-    "일정": "schedule",
-    "파일": "files",
-    "설정": "settings",
-}
 PROMPT_SUGGESTIONS = [
     "SOP | 챔버 온도 이탈 시 1차 대응 프로세스는?",
     "알람 | Heater TS EG0-60-07 발생 원인과 조치 순서?",
@@ -664,12 +656,17 @@ def _init_states() -> None:
         st.session_state.last_response_id = None
     if "last_answer_text" not in st.session_state:
         st.session_state.last_answer_text = ""
-    if "icon_modal" not in st.session_state:
-        st.session_state.icon_modal = None
-    if "icon_alert" not in st.session_state:
-        st.session_state.icon_alert = None
-    if "icon_toolbar_iter" not in st.session_state:
-        st.session_state.icon_toolbar_iter = 0  # 아이콘 버튼 key 중복 방지용
+    # Saved conversations + persistence config
+    if "saved_conversations" not in st.session_state:
+        st.session_state.saved_conversations: List[Dict[str, object]] = []
+    if "storage_mode" not in st.session_state:
+        st.session_state.storage_mode = "file"  # one of: "memory", "file", "sqlite"
+    if "storage_path" not in st.session_state:
+        st.session_state.storage_path = DEFAULT_JSONL_PATH
+    if "db_path" not in st.session_state:
+        st.session_state.db_path = DEFAULT_DB_PATH
+    if "_loaded_persisted_once" not in st.session_state:
+        st.session_state._loaded_persisted_once = False
 
 
 def _reset_conversation() -> None:
@@ -677,8 +674,6 @@ def _reset_conversation() -> None:
     st.session_state.timeline = []
     st.session_state.last_response_id = None
     st.session_state.last_answer_text = ""
-    st.session_state.icon_modal = None
-    st.session_state.icon_alert = None
     st.session_state.pop("queued_question", None)
 
 
@@ -731,6 +726,130 @@ def _extract_text(chunk: object) -> str:
     if isinstance(chunk, BaseMessage):
         return chunk.content or ""
     return str(chunk or "")
+
+
+# ===== Persistence helpers =====
+
+def _ensure_parent_dir(path: str) -> None:
+    try:
+        Path(path).parent.mkdir(parents=True, exist_ok=True)
+    except Exception:
+        pass
+
+def _load_saved_from_file(path: str) -> List[Dict[str, object]]:
+    p = Path(path)
+    if not p.exists():
+        return []
+    try:
+        if p.suffix.lower() == ".jsonl":
+            items: List[Dict[str, object]] = []
+            with p.open("r", encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        items.append(json.loads(line))
+                    except Exception:
+                        continue
+            return items
+        # default: JSON list
+        with p.open("r", encoding="utf-8") as f:
+            data = json.load(f)
+            return data if isinstance(data, list) else []
+    except Exception:
+        return []
+
+
+def _save_all_to_file(path: str, items: List[Dict[str, object]]) -> None:
+    _ensure_parent_dir(path)
+    p = Path(path)
+    try:
+        if p.suffix.lower() == ".jsonl":
+            with p.open("w", encoding="utf-8") as f:
+                for it in items:
+                    f.write(json.dumps(it, ensure_ascii=False) + "\n")
+        else:
+            with p.open("w", encoding="utf-8") as f:
+                json.dump(items, f, ensure_ascii=False, indent=2)
+    except Exception:
+        pass
+
+
+def _export_bytes_json(items: List[Dict[str, object]]) -> bytes:
+    return json.dumps(items, ensure_ascii=False, indent=2).encode("utf-8")
+
+
+def _export_bytes_csv(items: List[Dict[str, object]]) -> bytes:
+    # Flatten conversations: id, title, ts, messages_json
+    buf = StringIO()
+    writer = csv.writer(buf)
+    writer.writerow(["id", "title", "ts", "messages_json"])
+    for it in items:
+        writer.writerow([
+            it.get("id", ""),
+            it.get("title", ""),
+            it.get("ts", ""),
+            json.dumps(it.get("messages", []), ensure_ascii=False),
+        ])
+    return buf.getvalue().encode("utf-8-sig")  # add BOM for Excel compatibility
+
+
+# ===== SQLite helpers =====
+
+def _ensure_sqlite(db_path: str) -> sqlite3.Connection:
+    _ensure_parent_dir(db_path)
+    conn = sqlite3.connect(db_path)
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS conversations (
+            id TEXT PRIMARY KEY,
+            title TEXT,
+            messages TEXT,
+            ts TEXT
+        );
+        """
+    )
+    return conn
+
+
+def _db_upsert_conversation(db_path: str, conv: Dict[str, object]) -> None:
+    conn = _ensure_sqlite(db_path)
+    with conn:
+        conn.execute(
+            "INSERT INTO conversations(id, title, messages, ts) VALUES(?,?,?,?)\n"
+            "ON CONFLICT(id) DO UPDATE SET title=excluded.title, messages=excluded.messages, ts=excluded.ts;",
+            (
+                conv.get("id"),
+                conv.get("title"),
+                json.dumps(conv.get("messages", []), ensure_ascii=False),
+                conv.get("ts"),
+            ),
+        )
+    conn.close()
+
+
+def _db_fetch_conversations(db_path: str) -> List[Dict[str, object]]:
+    conn = _ensure_sqlite(db_path)
+    cur = conn.cursor()
+    cur.execute("SELECT id, title, messages, ts FROM conversations ORDER BY ts ASC")
+    rows = cur.fetchall()
+    conn.close()
+    items: List[Dict[str, object]] = []
+    for rid, title, messages, ts in rows:
+        try:
+            msgs = json.loads(messages) if messages else []
+        except Exception:
+            msgs = []
+        items.append({"id": rid, "title": title, "messages": msgs, "ts": ts})
+    return items
+
+
+def _db_delete_conversation(db_path: str, conv_id: str) -> None:
+    conn = _ensure_sqlite(db_path)
+    with conn:
+        conn.execute("DELETE FROM conversations WHERE id=?", (conv_id,))
+    conn.close()
 
 
 def _get_rag_components(
@@ -814,6 +933,113 @@ def _render_sidebar() -> Dict[str, object]:
             """,
             unsafe_allow_html=True,
         )
+
+        # ===== Recent & Saved conversations (ChatGPT-like) =====
+        st.markdown('<div class="sb-section-title">대화</div>', unsafe_allow_html=True)
+        st.button("＋ 새 대화", use_container_width=True, on_click=_reset_conversation)
+
+        # Save current conversation
+        if st.session_state.messages:
+            first_user = next((c for r, c in st.session_state.messages if r == "user" and c), "")
+        else:
+            first_user = ""
+        default_title = (first_user[:30] + ("…" if len(first_user) > 30 else "")) if first_user else datetime.now().strftime("대화 %m/%d %H:%M")
+        save_title = st.text_input("대화 제목", value=default_title, key="save_title")
+        if st.button("현재 대화 저장", use_container_width=True):
+            conv = {
+                "id": str(uuid.uuid4()),
+                "title": (save_title or default_title).strip(),
+                "messages": list(st.session_state.messages),
+                "ts": datetime.now(timezone.utc).isoformat(),
+            }
+            st.session_state.saved_conversations.append(conv)
+            # autosave to chosen backend
+            if st.session_state.storage_mode == "file":
+                _save_all_to_file(st.session_state.storage_path, st.session_state.saved_conversations)
+            elif st.session_state.storage_mode == "sqlite":
+                _db_upsert_conversation(st.session_state.db_path, conv)
+            st.success("현재 대화를 저장했습니다.")
+
+        # Search & list
+        q = st.text_input("대화 검색", placeholder="제목으로 검색")
+        items = st.session_state.saved_conversations
+        if q:
+            ql = q.strip().lower()
+            items = [c for c in items if ql in str(c.get("title", "")).lower()]
+        if items:
+            st.markdown('<div class="sb-section-title">저장된 대화</div>', unsafe_allow_html=True)
+            for conv in reversed(items[-100:]):
+                cols = st.columns([0.8, 0.2])
+                with cols[0]:
+                    if st.button(conv['title'], key=f"load_{conv['id']}", use_container_width=True):
+                        st.session_state.messages = list(conv.get("messages", []))
+                        st.success(f"대화 불러오기: {conv['title']}")
+                        st.rerun()
+                with cols[1]:
+                    if st.button("🗑️", key=f"del_{conv['id']}"):
+                        st.session_state.saved_conversations = [c for c in st.session_state.saved_conversations if c.get('id') != conv['id']]
+                        if st.session_state.storage_mode == "file":
+                            _save_all_to_file(st.session_state.storage_path, st.session_state.saved_conversations)
+                        elif st.session_state.storage_mode == "sqlite":
+                            _db_delete_conversation(st.session_state.db_path, conv['id'])
+                        st.info("삭제했습니다.")
+
+        # ===== Export section =====
+        st.markdown('<div class="sb-section-title">내보내기</div>', unsafe_allow_html=True)
+        colx, coly = st.columns(2)
+        with colx:
+            st.download_button(
+                label="JSON 다운로드",
+                data=_export_bytes_json(st.session_state.saved_conversations),
+                file_name="saved_conversations.json",
+                mime="application/json",
+                use_container_width=True,
+            )
+        with coly:
+            st.download_button(
+                label="CSV 다운로드",
+                data=_export_bytes_csv(st.session_state.saved_conversations),
+                file_name="saved_conversations.csv",
+                mime="text/csv",
+                use_container_width=True,
+            )
+
+        # ===== Persistence (file / SQLite) =====
+        st.divider()
+        st.markdown('<div class="sb-section-title">저장소</div>', unsafe_allow_html=True)
+        storage_mode = st.radio("방식", ["memory", "file", "sqlite"], index=["memory","file","sqlite"].index(st.session_state.storage_mode), horizontal=True)
+        st.session_state.storage_mode = storage_mode
+
+        if storage_mode == "file":
+            path = st.text_input("파일 경로", value=st.session_state.storage_path or DEFAULT_JSONL_PATH, help=".json 또는 .jsonl 권장")
+            st.session_state.storage_path = path
+            c1, c2 = st.columns(2)
+            with c1:
+                if st.button("파일에서 불러오기", use_container_width=True):
+                    st.session_state.saved_conversations = _load_saved_from_file(path)
+                    st.success("파일에서 불러왔습니다.")
+            with c2:
+                if st.button("파일로 저장", use_container_width=True):
+                    _save_all_to_file(path, st.session_state.saved_conversations)
+                    st.success("파일로 저장했습니다.")
+            st.caption("Streamlit Cloud의 로컬 파일은 앱 재시작/재배포 시 지워질 수 있습니다. 외부 DB를 권장합니다.")
+
+        elif storage_mode == "sqlite":
+            db_path = st.text_input("SQLite 경로", value=st.session_state.db_path or DEFAULT_DB_PATH)
+            st.session_state.db_path = db_path
+            c1, c2 = st.columns(2)
+            with c1:
+                if st.button("DB에서 불러오기", use_container_width=True):
+                    st.session_state.saved_conversations = _db_fetch_conversations(db_path)
+                    st.success("DB에서 불러왔습니다.")
+            with c2:
+                if st.button("DB로 저장(동기화)", use_container_width=True):
+                    for conv in st.session_state.saved_conversations:
+                        _db_upsert_conversation(db_path, conv)
+                    st.success("DB에 동기화했습니다.")
+
+        # ===== Conversation settings at the very bottom =====
+        st.divider()
         st.header("⚙️ 대화 설정")
         model_default = os.getenv("MODEL_FT") or os.getenv("SVC_MODEL") or "ft:gpt-4.1-mini-2025-04-14:personal:svc-41mini-sft-dpo-80usd-sft:CLB4qudK"
         model_options = list(dict.fromkeys([
@@ -830,19 +1056,9 @@ def _render_sidebar() -> Dict[str, object]:
         use_compression = st.toggle("문맥 압축", True)
         show_sources = st.toggle("근거 문서 표시", True)
         pinecone_index = st.text_input("Pinecone Index", os.getenv("PINECONE_INDEX", ""))
-        if st.button("대화 초기화", use_container_width=True):
-            _reset_conversation()
-            st.success("대화 히스토리를 초기화했습니다.")
 
-        if st.button("🔧 단위 테스트 실행", use_container_width=True):
-            results = _run_unit_tests()
-            ok_cnt = sum(1 for r in results if r.startswith("✅"))
-            fail_cnt = sum(1 for r in results if r.startswith("❌"))
-            st.info(f"테스트 결과 (성공/실패): {ok_cnt} / {fail_cnt}")
-            for r in results:
-                st.write(r)
-
-        return {
+        # warn on change
+        current = {
             "model": model,
             "temperature": temperature,
             "top_k": top_k,
@@ -852,26 +1068,26 @@ def _render_sidebar() -> Dict[str, object]:
             "show_sources": show_sources,
             "pinecone_index": pinecone_index.strip(),
         }
+        prev = st.session_state.get("_last_sidebar_settings")
+        if prev is not None and current != prev:
+            st.warning("임의 설정시 답변의 품질이 달라질 수 있습니다", icon="⚠️")
+        st.session_state._last_sidebar_settings = current
+
+        if st.button("대화 초기화", use_container_width=True):
+            _reset_conversation()
+            st.success("대화 히스토리를 초기화했습니다.")
+
+        return current
 
 
 def _render_history_panel() -> None:
-    toolbar = st.container()
-    with toolbar:
-        st.markdown('<div class="icon-toolbar">', unsafe_allow_html=True)
-        suffix = st.session_state.get("icon_toolbar_iter", 0)  # 아이콘 버튼 키 고유화(요청사항)
-        for icon, label in ICON_STACK:
-            action = ICON_ACTION_MAP.get(label)
-            if st.button(icon, key=f"icon_{action}_{suffix}", help=label):
-                if action:
-                    _handle_icon_action(action)
-        st.markdown("</div>", unsafe_allow_html=True)
-    st.session_state.icon_toolbar_iter += 1  # 다음 렌더링 시 중복 키 방지
     st.markdown(
         "<div class='conversation-header'>최근 대화</div>",
         unsafe_allow_html=True,
     )
     timeline = [
-        entry for entry in st.session_state.timeline if entry.get("role") == "user" and entry.get("content")
+        entry for entry in st.session_state.timeline
+        if entry.get("role") == "user" and entry.get("content")
     ]
 
     if not timeline:
@@ -886,7 +1102,9 @@ def _render_history_panel() -> None:
             ts = datetime.fromisoformat(entry["ts"])
         except Exception:
             ts = datetime.now(timezone.utc)
-        snippet = html.escape(entry["content"][:110] + ("..." if len(entry["content"]) > 110 else ""))
+        snippet = html.escape(
+            entry["content"][:110] + ("..." if len(entry["content"]) > 110 else "")
+        )
         time_label = ts.astimezone().strftime("%m/%d %H:%M")
         st.markdown(
             f"""
@@ -1124,6 +1342,17 @@ def _run_unit_tests() -> List[str]:
 
 def main() -> None:
     _init_states()
+    # Auto-load persisted conversations once per session
+    if not st.session_state._loaded_persisted_once:
+        try:
+            if st.session_state.storage_mode == "file" and st.session_state.storage_path:
+                st.session_state.saved_conversations = _load_saved_from_file(st.session_state.storage_path)
+            elif st.session_state.storage_mode == "sqlite" and st.session_state.db_path:
+                st.session_state.saved_conversations = _db_fetch_conversations(st.session_state.db_path)
+        except Exception:
+            pass
+        st.session_state._loaded_persisted_once = True
+
     sidebar_cfg = _render_sidebar()
     os.environ["SVC_MODEL"] = sidebar_cfg["model"]
     os.environ["SVC_TEMPERATURE"] = str(sidebar_cfg["temperature"])
